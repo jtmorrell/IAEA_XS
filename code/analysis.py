@@ -58,7 +58,8 @@ class manager(object):
 			x4 = sorted(self.filter_outliers(monitor,[[float(i[1]),float(i[2]),float(i[3]),float(i[4])] for i in self.db.execute('SELECT * FROM exfor WHERE isotope=?',(istp,))],rec[0][0],rec[-1][0]),key=lambda h:h[0])
 			Erange = np.arange(rec[0][0],rec[-1][0],0.1)
 			E,dE,XS,dXS = [i[0] for i in x4],[i[1] for i in x4],[i[2] for i in x4],[i[3] for i in x4]
-			sigma = interp1d(E,self.exp_smooth(dXS,0.2),bounds_error=False,fill_value='extrapolate')
+			sm_dXS = self.exp_smooth(dXS,0.1)
+			sigma = interp1d(E,sm_dXS,bounds_error=False,fill_value=(sm_dXS[0],sm_dXS[-1]))
 			self.db.executemany('UPDATE monitor_xs SET unc_cross_section=? WHERE product=? AND energy=?',[(float(sigma(e[0])),istp,e[0]) for e in rec])
 			self.db_connection.commit()
 			ax.plot(Erange,[monitor(e) for e in Erange],color=self.pallate['k'],label='IAEA Rec. XS',zorder=10)
@@ -76,7 +77,27 @@ class manager(object):
 				f.savefig('../plots/'+istp+'.png')
 				f.savefig('../plots/'+istp+'.pdf')
 				plt.close()
-			
+	def save_as_xlsx(self):
+		from openpyxl import Workbook
+		wb = Workbook()
+		ws = wb.active
+		for n,tt in enumerate(['Target','Product','E [MeV]','XS [mb]','unc_XS [mb]']):
+			ws.cell(row=1,column=n+1,value=tt)
+		for n,ln in enumerate([[str(i[0]),str(i[1]),float(i[2]),float(i[3]),float(i[4])] for i in self.db.execute('SELECT * FROM monitor_xs')]):
+			for m,i in enumerate(ln):
+				ws.cell(row=n+2,column=m+1,value=i)
+		wb.save('../data/iaea_xs.xlsx')
+	def save_as_csv(self):
+		f = open('../data/iaea_xs.csv','w')
+		ss = ','.join(['#Target','Product','E [MeV]','XS [mb]','unc_XS [mb]'])+'\n'
+		f.write(ss+'\n'.join([','.join([str(i[0]),str(i[1]),str(i[2]),str(i[3]),str(i[4])]) for i in self.db.execute('SELECT * FROM monitor_xs')]))
+		f.close()
+	def move_data(self,target):
+		db_connection = sqlite3.connect(target)
+		db = db_connection.cursor()
+		db.execute('DELETE FROM monitor_xs')
+		db.executemany('INSERT INTO monitor_xs VALUES(?,?,?,?,?)',[(str(i[0]),str(i[1]),float(i[2]),float(i[3]),float(i[4])) for i in self.db.execute('SELECT * FROM monitor_xs')])
+		db_connection.commit()
 
 
 if __name__ == "__main__":
@@ -85,3 +106,6 @@ if __name__ == "__main__":
 	mn.update_exfor()
 	mn.update_recommended()
 	mn.calculate_uncertainties()
+	mn.save_as_csv()
+	mn.save_as_xlsx()
+	# mn.move_data('../../LaCe_Bernstein_Sep2017/data/peak_data.db')
